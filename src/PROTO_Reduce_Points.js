@@ -16,8 +16,7 @@ function PROTO_Reduce_Points(){
 			continue;
 
 		var useTiming = node.getAttr(curNode, 1, "drawing.elementMode").boolValue();
-		var drawColumn = node.linkedColumn(curNode, useTiming ? "drawing.element" : "drawing.customName.timing");			
-		var capturedShapes = [], colorIdHistory = [];	
+		var drawColumn = node.linkedColumn(curNode, useTiming ? "drawing.element" : "drawing.customName.timing");	
 
 		// Capture all shapes in the current node returned by Drawing.query.getStrokes().	
 		for (var fr = 1; fr <= frame.numberOf(); fr++){		
@@ -37,20 +36,16 @@ function PROTO_Reduce_Points(){
 				var layersDef = { drawing: nodeDef, art: artLayer, layers: layerIndices };		
 				DrawingTools.deleteLayers(layersDef);
 				
-				for (var sl = 0; sl < subLayers.layers.length; sl++){					
+				for (var sl = 0; sl < subLayers.layers.length; sl++){
 					// Caprure shapes that use each item on "shaders" array.		
 					for (var shaderIdx = 0; shaderIdx < subLayers.layers[sl].shaders.length; shaderIdx++){
-						var curColorId = subLayers.layers[sl].shaders[shaderIdx].colorId;				
-						if (colorIdHistory.indexOf(curColorId) == -1)
-							colorIdHistory.push(curColorId);
-						
+						var curColorId = subLayers.layers[sl].shaders[shaderIdx].colorId;
 						var sublayer = subLayers.layers[sl];
+						
 						// Create a history of visited "links" to strokes on joints so we won't parse the same item twice.
 						// This will be passed to traceStrokesUntilClose() by reference.
 						// Each link is a string: joints index + "-" + strokes index.
-						var strokeLink = {};
-						strokeLink.history = [];
-						
+						var strokeLink = {}; strokeLink.history = [];						
 						var localShapes = [], sequenceHistory = [];					
 						for (var jt = 0; jt < sublayer.joints.length; jt++){
 							// if the joint doesn't connect shapes together, skip.
@@ -73,8 +68,7 @@ function PROTO_Reduce_Points(){
 								// Find and capture all closed paths. Not all closed paths are marked as closed.
 								// We can only tell by checking if the start joint of a chain of paths is same as the last joint.
 								// Following fuction travels between paths by tracking stroke indexes found on each joint object.
-								// Also find which side of line has the current shader, then keep tracking the path that has the shader on the same side.
-								
+								// Also find which side of line has the current shader, then keep tracking the path that has the shader on the same side.						
 								var stIdx = jointStrokes[js].strokeIndex;
 								var shaderSide = null;
 								if ("shaderRight" in sublayer.strokes[stIdx] && sublayer.strokes[stIdx].shaderRight === shaderIdx)
@@ -108,20 +102,20 @@ function PROTO_Reduce_Points(){
 										// Capture paths by following the stroke indexes captured by closedMemberStrokes
 										var shape = [];										
 										for (var st = 0; st < closedMemberStrokes.idx.length; st++){
-											var stroke = subLayers.layers[sl].strokes[closedMemberStrokes.idx[st]];
+											var curStrokes = subLayers.layers[sl].strokes[closedMemberStrokes.idx[st]];
 											
 											// Some path's points will come out in reversed order. They need to be parsed from bottom to top.
 											if (closedMemberStrokes.isBackward[st]){	
-												for (var pt = stroke.path.length -1; pt >= 1; pt--){						
-													var capturedPath = PF.capturePath(stroke.path, pt, closedMemberStrokes.isBackward[st]);
+												for (var pt = curStrokes.path.length -1; pt >= 1;){						
+													var capturedPath = PF.capturePath(curStrokes.path, pt, closedMemberStrokes.isBackward[st]);
 													shape.push.apply(shape, capturedPath.paths);
-													pt -= capturedPath.forwardBy;
+													pt -= capturedPath.step;
 												}
 											}else{
-												for (var pt = 0; pt < stroke.path.length -1; pt++){						
-													var capturedPath = PF.capturePath(stroke.path, pt, closedMemberStrokes.isBackward[st]);
+												for (var pt = 0; pt < curStrokes.path.length -1;){						
+													var capturedPath = PF.capturePath(curStrokes.path, pt, closedMemberStrokes.isBackward[st]);
 													shape.push.apply(shape, capturedPath.paths);
-													pt += capturedPath.forwardBy;
+													pt += capturedPath.step;
 												}
 											}
 										}
@@ -130,25 +124,22 @@ function PROTO_Reduce_Points(){
 									}
 								}
 							}
-						}		
+						}
 						// Check if shape(s) found in a layer is hole(s) of another shape within the layer
 						if (localShapes.length > 1){
-							var sortedShapes = PF.findHoles(localShapes);
-							capturedShapes.push(sortedShapes);							
+							var sortedShapes = PF.findHoles(localShapes);						
 						}else
-							capturedShapes.push({"0": {owner: localShapes[0]}});
+							var sortedShapes = {"0": {owner: localShapes[0]}};
 
-						for (var cs = 0; cs < capturedShapes.length; cs++){	
-							for (var sp in capturedShapes[cs]){	
-								var owner = PF.reduceAndRearrange(capturedShapes[cs][sp].owner);
-								var holes = null;						
-								if("holes" in capturedShapes[cs][sp]){
-									holes = [];
-									for (var hl = 0; hl < capturedShapes[cs][sp].holes.length; hl++)									
-										holes.push(PF.reduceAndRearrange(capturedShapes[cs][sp].holes[hl]));	
-								}
-								PF.createShapes( sNodes[sn], holes, owner, fr, curColorId, null, null );
+						for (var ss in sortedShapes){	
+							var owner = PF.reduceAndRearrange(sortedShapes[ss].owner);
+							var holes = null;						
+							if("holes" in sortedShapes[ss]){
+								holes = [];
+								for (var hl = 0; hl < sortedShapes[ss].holes.length; hl++)									
+									holes.push(PF.reduceAndRearrange(sortedShapes[ss].holes[hl]));	
 							}
+							PF.createShapes( sNodes[sn], holes, owner, fr, curColorId, null, null );
 						}
 					}
 				}
@@ -241,7 +232,7 @@ function private_functions()
 				var p1y = paths[idx+1].y;
 			}
 			var p3 = {x:  p1x, y: p1y, onCurve: false};
-			var forwardBy = 0;				
+			var step = 1;				
 		// Else, current path is a standard cubic bezier curve			
 		}else{	
 			if (isBackward){
@@ -261,11 +252,11 @@ function private_functions()
 			}	
 			var p2 = {x: p2x, y: p2y, onCurve: false};
 			var p3 = {x: p3x, y: p3y, onCurve: false};
-			var forwardBy = 2;			
+			var step = 3;			
 		}
 		var p1 = {x: p1x, y: p1y, onCurve: true};
 
-		return {paths: [p0, p2, p3, p1], forwardBy: forwardBy};
+		return {paths: [p0, p2, p3, p1], step: step};
 	};
 
 		
