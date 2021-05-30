@@ -11,37 +11,40 @@ function PROTO_Reduce_Points(){
 	scene.beginUndoRedoAccum("");
 	
 	for (var sn = 0; sn < sNodes.length; sn++){	
-		var curNode = sNodes[sn];
-		if (node.type(curNode) !== "READ")
+		if (node.type(sNodes[sn]) !== "READ")
 			continue;
-
-		var useTiming = node.getAttr(curNode, 1, "drawing.elementMode").boolValue();
-		var drawColumn = node.linkedColumn(curNode, useTiming ? "drawing.element" : "drawing.customName.timing");	
+		
+		var useTiming = node.getAttr(sNodes[sn], 1, "drawing.elementMode").boolValue();
+		var drawColumn = node.linkedColumn(curNode, useTiming ? "drawing.element" : "drawing.customName.timing");
+		var usedCelHistory = [];
 
 		// Capture all shapes in the current node returned by Drawing.query.getStrokes().	
-		for (var fr = 1; fr <= frame.numberOf(); fr++){		
-			for (var artLayer = 0; artLayer < 4; artLayer++){
-				var nodeDef = {node: curNode, frame: fr};				
-				var layerDef = {drawing: nodeDef, art: artLayer};
+		for (var fr = 1; fr <= frame.numberOf(); fr++){
+			var curCel = column.getEntry(drawColumn, 1, fr);
+			if (usedCelHistory.indexOf(curCel) !== -1)
+				continue;
+			usedCelHistory.push(curCel);
+			
+			for (var at = 0; at < 4; at++){
+				var nodeDef = {node: sNodes[sn], frame: fr};
+				var layerDef = {drawing: nodeDef, art: at};
 				var numStrokes = Drawing.query.getNumberOfLayers(layerDef);
 				if (numStrokes == 0)
 					continue;
 				
 				var subLayers = Drawing.query.getStrokes(layerDef);
 				
-				// Clear the current kayer first
+				// Clear the current layer first
 				var layerIndices = [];
 				for (var ly = 0; ly < subLayers.layers.length; ly++)
-					layerIndices.push(ly);			
-				var layersDef = { drawing: nodeDef, art: artLayer, layers: layerIndices };		
-				DrawingTools.deleteLayers(layersDef);
+					layerIndices.push(ly);	
+				DrawingTools.deleteLayers({drawing: nodeDef, art: at, layers: layerIndices});
 				
-				for (var sl = 0; sl < subLayers.layers.length; sl++){
+				for (var sl = 0; sl < subLayers.layers.length; sl++){				
 					// Caprure shapes that use each item on "shaders" array.		
 					for (var shaderIdx = 0; shaderIdx < subLayers.layers[sl].shaders.length; shaderIdx++){
-						var curColorId = subLayers.layers[sl].shaders[shaderIdx].colorId;
 						var sublayer = subLayers.layers[sl];
-						
+//MessageLog.trace(JSON.stringify(sublayer));
 						// Create a history of visited "links" to strokes on joints so we won't parse the same item twice.
 						// This will be passed to traceStrokesUntilClose() by reference.
 						// Each link is a string: joints index + "-" + strokes index.
@@ -74,25 +77,28 @@ function PROTO_Reduce_Points(){
 								if ("shaderRight" in sublayer.strokes[stIdx] && sublayer.strokes[stIdx].shaderRight === shaderIdx)
 									shaderSide = "shaderRight";
 								else if ("shaderLeft" in sublayer.strokes[stIdx] && sublayer.strokes[stIdx].shaderLeft === shaderIdx)
-									shaderSide = "shaderLeft";							
+									shaderSide = "shaderLeft";
 								if (shaderSide === null || sublayer.strokes[stIdx].shaderRight === sublayer.strokes[stIdx].shaderLeft)
 									continue;
 
 								// Also check if the first stroke is a backward stroke.
 								// This determine whether we should switch shader sides on backward strokes, or regular strokes.
-								var isShaderBackward = (jointStrokes[js].vertex !== 0);																
-								var closedMemberStrokes = PF.traceStrokesUntilClose(	jointStrokes[js].strokeIndex,
-																						jointStrokes[js].vertex,
-																						sublayer.joints[jt].x,
-																						sublayer.joints[jt].y,
-																						sublayer,
-																						memberStrokes,
-																						strokeLink,
-																						shaderIdx,
-																						shaderSide,
-																						isShaderBackward
-								);
-								
+								var isShaderBackward = (jointStrokes[js].vertex !== 0);
+
+								if ( sublayer.strokes[stIdx].closed )
+									var closedMemberStrokes = {"idx":[stIdx],"isBackward":[isShaderBackward]};
+								else
+									var closedMemberStrokes = PF.traceStrokesUntilClose(	jointStrokes[js].strokeIndex,
+																							jointStrokes[js].vertex,
+																							sublayer.joints[jt].x,
+																							sublayer.joints[jt].y,
+																							sublayer,
+																							memberStrokes,
+																							strokeLink,
+																							shaderIdx,
+																							shaderSide,
+																							isShaderBackward
+									);								
 								if (closedMemberStrokes !== null){
 									var strokeSequence = closedMemberStrokes.idx.slice();
 									var sequenceJoined = strokeSequence.sort().join("-");						
@@ -119,7 +125,6 @@ function PROTO_Reduce_Points(){
 												}
 											}
 										}
-										// Temporary store all shapes to array for the current layer so we can compare each other
 										localShapes.push(shape);
 									}
 								}
@@ -131,6 +136,7 @@ function PROTO_Reduce_Points(){
 						}else
 							var sortedShapes = {"0": {owner: localShapes[0]}};
 
+						var curColorId = subLayers.layers[sl].shaders[shaderIdx].colorId;
 						for (var ss in sortedShapes){	
 							var owner = PF.reduceAndRearrange(sortedShapes[ss].owner);
 							var holes = null;						
