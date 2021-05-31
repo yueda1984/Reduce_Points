@@ -19,7 +19,7 @@ function PROTO_Reduce_Points()
 	var unit = max/sNodes.length;	
 	var pbWindow = PF.defineProgressBar(percentage, max, scriptVer);	
 	pbWindow.show();
-	PF.updateProgressBar(pbWindow, percentage, "Starting...\n");	
+	PF.updateProgressBar(pbWindow, percentage, "", "");	
 
 	scene.beginUndoRedoAccum("");
 
@@ -52,10 +52,10 @@ function PROTO_Reduce_Points()
 				continue;				
 		
 			parsedCelHistory.push(curCel);
-			PF.updateProgressBar(pbWindow, percentage, sNodes[sn] + "\nframe " + fr);
+			PF.updateProgressBar(pbWindow, percentage, sNodes[sn], fr);
 			PF.parseCel(sNodes[sn], curCel, fr, maxError);
 			percentage += subUnit;
-			PF.updateProgressBar(pbWindow, percentage, sNodes[sn] + "\nframe " + fr);			
+			PF.updateProgressBar(pbWindow, percentage, sNodes[sn], fr);			
 		}
 	}
 	
@@ -74,25 +74,21 @@ function PROTO_Reduce_Points()
 
 function private_functions()
 {
-	var FT = new fitCurveJS.fitCurveMaster;
-
-
 	this.defineProgressBar = function(initialVal, max, _scriptVer)
 	{
 		var dialog = new QWidget(this.getParentWidget());
 		dialog.setAttribute(Qt.WA_DeleteOnClose);
 		dialog.setWindowTitle("Reduce Points v"  + _scriptVer);
 		dialog.setMinimumSize(348, 72);
-		dialog.setWindowFlags(Qt.Tool);
-		
+		dialog.setWindowFlags(Qt.Tool);		
 		dialog.mainLayout = new QVBoxLayout(dialog);
-
-		dialog.pbLabel = new QLabel("");		
+		dialog.pbLabel = new QLabel("");
+		dialog.frameLabel = new QLabel("");		
 		dialog.pb = new QProgressBar();
 		dialog.pb.setRange(initialVal, max);
-		dialog.mainLayout.addWidget(dialog.pbLabel, 0, 0);		
-		dialog.mainLayout.addWidget(dialog.pb, 0, 1);		
-		
+		dialog.mainLayout.addWidget(dialog.pbLabel, 0, 0);
+		dialog.mainLayout.addWidget(dialog.frameLabel, 0, 1);		
+		dialog.mainLayout.addWidget(dialog.pb, 0, 2);				
 		return dialog;
 	};
 
@@ -107,9 +103,10 @@ function private_functions()
 	};
 
 
-	this.updateProgressBar = function(pbWindow, percentage, message)
+	this.updateProgressBar = function(pbWindow, percentage, message, fr)
 	{
-		pbWindow.pbLabel.text = message;
+		pbWindow.pbLabel.text = "Node: " + message;
+		pbWindow.frameLabel.text = "Frame: " + fr;
 		pbWindow.pb.setValue(percentage);
 		System.processOneEvent();
 		if (!pbWindow.visible)
@@ -264,15 +261,29 @@ function private_functions()
 	
 	this.reduceAndRearrange = function(curPath, maxError)
 	{
-		var points = [];		
-		// descretize curPath 4 points at time then convert into arrays of points.
-		for (var st = 0; st < curPath.length-3; st+=4)
-		{					
-			var def = {precision: 3, path: curPath.slice(st, st+4)};
-			var discretizedPath = Drawing.geometry.discretize(def);
-			discretizedPath.forEach(function(item){points.push([item.x, item.y])});
+		var points = [];
+		var pathLength = curPath.length;	
+		if (pathLength >= 250)
+			for (var st = 0; st < pathLength-3; st+=4)
+			{
+				points.push([curPath[st].x, curPath[st].y]);
+				if (st === curPath.length-4)
+					points.push([curPath[st+3].x, curPath[st+3].y]);				
+			}
+		// If the bezier doesn't have enough points for line fitting, descretize curPath 4 points at time then convert into arrays of points.			
+		else
+		{
+			var precision = 10 -Math.floor(pathLength/25);		
+			for (var st = 0; st < pathLength-3; st+=4)
+			{					
+				var def = {precision: precision, path: curPath.slice(st, st+4)};
+				var discretizedPath = Drawing.geometry.discretize(def);
+				discretizedPath.forEach(function(item){points.push([item.x, item.y])});
+			}
 		}
-		// Line fitting using fit-curve.js			
+
+		// Line fitting using fit-curve.js
+		var FT = new fitCurveJS.fitCurveMaster;
 		var fittedBezier = FT.fitCurve(points, maxError);					
 
 		// Format the paths to match the convention DrawingTools.createLayers() accepts.
