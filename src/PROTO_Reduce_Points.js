@@ -263,7 +263,7 @@ function private_functions()
 	{
 		var points = [];
 		var pathLength = curPath.length;	
-		if (pathLength >= 250)
+		if (pathLength >= 400)
 			for (var st = 0; st < pathLength-3; st+=4)
 			{
 				points.push([curPath[st].x, curPath[st].y]);
@@ -273,7 +273,8 @@ function private_functions()
 		// If the bezier doesn't have enough points for line fitting, descretize curPath 4 points at time then convert into arrays of points.			
 		else
 		{
-			var precision = 10 -Math.floor(pathLength/25);		
+			var precision = 5 -Math.floor(pathLength/40);
+			if (precision < 1) precision = 1;
 			for (var st = 0; st < pathLength-3; st+=4)
 			{					
 				var def = {precision: precision, path: curPath.slice(st, st+4)};
