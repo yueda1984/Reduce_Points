@@ -116,6 +116,7 @@ function private_functions()
 	
 	this.parseCel = function(argNode, fr, maxError)
 	{
+		var shapeDefs = [];
 		for (var at = 0; at < 4; at++)
 		{
 			var nodeDef = {node: argNode, frame: fr};
@@ -138,7 +139,11 @@ function private_functions()
 				for (var shaderIdx = 0; shaderIdx < subLayers.layers[sl].shaders.length; shaderIdx++)
 				{
 					var sublayer = subLayers.layers[sl];
-//MessageLog.trace(JSON.stringify(sublayer));
+					
+					// Reduce number of points on each stroke
+					for (var sr = 0; sr < sublayer.strokes.length; sr++)					
+						 sublayer.strokes[sr].path = this.reducePath(sublayer.strokes[sr].path, maxError);
+					
 					// Create a history of visited "links" to strokes on joints so we won't parse the same item twice.
 					// This will be passed to traceStrokesUntilClose() by reference.
 					// Each link is a string: joints index + "-" + strokes index.
@@ -243,40 +248,55 @@ function private_functions()
 					var curColorId = subLayers.layers[sl].shaders[shaderIdx].colorId;
 					for (var ss in sortedShapes)
 					{	
-						var owner = this.reduceAndRearrange(sortedShapes[ss].owner, maxError);
+						var owner = this.rearrangeStructure(sortedShapes[ss].owner);
 						var holes = null;						
 						if("holes" in sortedShapes[ss])
 						{
 							holes = [];
 							for (var hl = 0; hl < sortedShapes[ss].holes.length; hl++)									
-								holes.push(this.reduceAndRearrange(sortedShapes[ss].holes[hl], maxError));	
+								holes.push(this.rearrangeStructure(sortedShapes[ss].holes[hl]));	
 						}
-						this.createShapes( argNode, holes, owner, fr, curColorId, null, null );
+						shapeDefs.unshift( this.defineShapes( argNode, holes, owner, fr, curColorId, null, null ) );
 					}
 				}
 			}
 		}
+		shapeDefs.forEach(function(item){DrawingTools.createLayers(item)});
 	};
 	
 	
-	this.reduceAndRearrange = function(curPath, maxError)
+	this.rearrangeStructure = function(curPath)
 	{
+		var reducedPath = [];
+		for (var fb = 0; fb < curPath.length; fb+=4)
+		{	
+			reducedPath.push({x: curPath[fb].x, y: curPath[fb].y, onCurve: true});
+			reducedPath.push({x: curPath[fb+1].x, y: curPath[fb+1].y, onCurve: false});
+			reducedPath.push({x: curPath[fb+2].x, y: curPath[fb+2].y, onCurve: false});
+			
+			if (fb === curPath.length -4)
+				reducedPath.push({x: curPath[fb+3].x, y: curPath[fb+3].y, onCurve: true});		
+		}	
+		return reducedPath;
+	};
+	
+	
+	this.reducePath = function(curPath, maxError)
+	{
+	//MessageLog.trace(JSON.stringify(curPath));	
+
 		var points = [];
-		var pathLength = curPath.length;	
-		if (pathLength >= 400)
-			for (var st = 0; st < pathLength-3; st+=4)
-			{
-				points.push([curPath[st].x, curPath[st].y]);
-				if (st === curPath.length-4)
-					points.push([curPath[st+3].x, curPath[st+3].y]);				
-			}
-		// If the bezier doesn't have enough points for line fitting, descretize curPath 4 points at time then convert into arrays of points.			
+		var pathLength = curPath.length;
+		if (pathLength <= 7)
+			return curPath;	
+	
+		// Add enough points for line fitting, descretize curPath 4 points at time then convert into arrays of points.			
 		else
 		{
-			var precision = 5 -Math.floor(pathLength/40);
+			var precision = 5 -Math.floor(pathLength/10);
 			if (precision < 1) precision = 1;
-			for (var st = 0; st < pathLength-3; st+=4)
-			{					
+			for (var st = 0; st < pathLength-3; st+=3)
+			{	
 				var def = {precision: precision, path: curPath.slice(st, st+4)};
 				var discretizedPath = Drawing.geometry.discretize(def);
 				discretizedPath.forEach(function(item){points.push([item.x, item.y])});
@@ -285,37 +305,37 @@ function private_functions()
 
 		// Line fitting using fit-curve.js
 		var FT = new fitCurveJS.fitCurveMaster;
-		var fittedBezier = FT.fitCurve(points, maxError);					
-
+		var fittedBezier = FT.fitCurve(points, maxError);
+			
 		// Format the paths to match the convention DrawingTools.createLayers() accepts.
 		var reducedPath = [];
 		for (var fb = 0; fb < fittedBezier.length; fb++)
 		{
 			reducedPath.push({x: fittedBezier[fb][0][0], y: fittedBezier[fb][0][1], onCurve: true});
-			reducedPath.push({x: fittedBezier[fb][1][0], y: fittedBezier[fb][1][1], onCurve: false});
-			reducedPath.push({x: fittedBezier[fb][2][0], y: fittedBezier[fb][2][1], onCurve: false});
+			reducedPath.push({x: fittedBezier[fb][1][0], y: fittedBezier[fb][1][1]});
+			reducedPath.push({x: fittedBezier[fb][2][0], y: fittedBezier[fb][2][1]});
 			
-			if (fb === fittedBezier.length -1)
+			if (fb === fittedBezier.length-1)
 				reducedPath.push({x: fittedBezier[fb][3][0], y: fittedBezier[fb][3][1], onCurve: true});
 		}
 		return reducedPath;
-	};
+	};	
 	
 	
-	this.createShapes = function (argNode, holes, owner, fr, colorId, strokeColorId, strokeWidth)
+	this.defineShapes = function(argNode, holes, owner, fr, colorId, strokeColorId, strokeWidth)
 	{		
-		var arg = {}
-		arg.drawing = {node: argNode, frame: fr};
-		arg.art = 1;
+		var def = {}
+		def.drawing = {node: argNode, frame: fr};
+		def.art = 1;
 
 		if(holes !== null)
 		{		
-			arg.masks = [];		
+			def.masks = [];		
 			for (var hl = 0; hl < holes.length; hl++)
-				arg.masks.push({path: holes[hl]});
+				def.masks.push({path: holes[hl]});
 		}
 	
-		arg.layers = [{
+		def.layers = [{
 						shaders: [{colorId : colorId}],
 						under: true,
 						referenceLayer: 0,
@@ -328,13 +348,12 @@ function private_functions()
 		// If shpe has visible outlines
 		if (strokeColorId !== null)
 		{
-			arg.layers[0].strokes[0].stroke = true;
-			arg.layers[0].strokes[0].thickness = {maxThickness: strokeWidth*2, minThickness: 0, thicknessPath: strokeWidth*2};
-			arg.layers[0].strokes[0].pencilColorId = strokeColorId;			
+			def.layers[0].strokes[0].stroke = true;
+			def.layers[0].strokes[0].thickness = {maxThickness: strokeWidth*2, minThickness: 0, thicknessPath: strokeWidth*2};
+			def.layers[0].strokes[0].pencilColorId = strokeColorId;			
 		}	
-		DrawingTools.createLayers(arg);
-	};	
-
+		return def;
+	};
 					
 	this.capturePath = function(paths, idx, isBackward)
 	{
